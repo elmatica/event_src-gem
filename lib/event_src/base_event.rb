@@ -17,6 +17,12 @@ class EventSrc::BaseEvent < ActiveRecord::Base
     def aggregator
       @aggregator || (raise StandardError, "aggregator has not been set on: #{name}")
     end
+
+    def event_for(relation_name, class_name: nil)
+      self.table_name = "#{relation_name}_events"
+      class_name ||= "::#{relation_name.to_s.classify}"
+      belongs_to relation_name, class_name: class_name, autosave: false
+    end
   end
 
   after_initialize do
