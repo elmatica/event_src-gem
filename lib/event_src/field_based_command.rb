@@ -90,10 +90,9 @@ class EventSrc::FieldBasedCommand
       if value_present && value_changed
         event = event_class.new(
           key => value,
+          self.class.record_attr_name => model,
           actor_id: actor_id,
-          organisation: organisation,
         )
-
         acc << event
       end
       acc
