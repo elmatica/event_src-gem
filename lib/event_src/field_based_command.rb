@@ -86,7 +86,7 @@ class EventSrc::FieldBasedCommand
     @events ||= self.class.event_classes.reduce([]) do |acc, (key, event_class)|
       value = self.attributes[key.to_s]
       value_present = value != nil
-      value_changed = model[key] != value
+      value_changed = ValueChanged.changed?(model, key, value)
       if value_present && value_changed
         event = event_class.new(
           key => value,
