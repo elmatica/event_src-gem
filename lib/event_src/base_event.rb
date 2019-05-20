@@ -1,60 +1,69 @@
-# This is the BaseEvent class that all Events inherit from.
+# This is the BaseEvent module that all Events should use.
 # It defines setters and accessors for the defined `data_attributes`
-# After create, it uses the sub classes aggregator to apply changes.
+# After create, it uses the aggregator defined by the consumer to apply changes.
 #
-# Subclasses must call self.aggregator=.
-class EventSrc::BaseEvent < ActiveRecord::Base
-  before_validation :preset_aggregate
-  before_create :apply_and_persist
+# Classes including this module must call self.aggregator=.
+module EventSrc::BaseEvent
+  extend ActiveSupport::Concern
 
-  self.abstract_class = true
+  included do
+    before_validation :preset_aggregate
+    before_create :apply_and_persist
+    self.table_name = :events
+    scope :recent_first, -> { reorder("id DESC") }
+    after_initialize do
+      self.data ||= {}
+    end
 
-  scope :recent_first, -> { reorder("id DESC") }
+    extend ClassMethods
+  end
 
-  class << self
+  module ClassMethods
     attr_writer :aggregator
+    attr_writer :aggregate_name
 
     def aggregator
       @aggregator || (raise StandardError, "aggregator has not been set on: #{name}")
     end
 
+    def aggregate_name
+      @@aggregate_name || (raise "Events must belong to an aggregate")
+    end
+
     def event_for(relation_name, class_name: nil)
-      self.table_name = "#{relation_name}_events"
-      class_name ||= "::#{relation_name.to_s.classify}"
-      belongs_to relation_name, class_name: class_name, autosave: false
-    end
-  end
-
-  after_initialize do
-    self.data ||= {}
-  end
-
-  # Define attributes to be serialize in the `data` column.
-  # It generates setters and getters for those.
-  #
-  # Example:
-  #
-  # class MyEvent < EventSrc::BaseEvent
-  #   data_attributes :title, :description, :drop_id
-  # end
-  def self.data_attributes(*attrs)
-    @data_attributes ||= []
-
-    attrs.map(&:to_s).each do |attr|
-      @data_attributes << attr unless @data_attributes.include?(attr)
-
-      define_method attr do
-        self.data ||= {}
-        self.data[attr]
-      end
-
-      define_method "#{attr}=" do |arg|
-        self.data ||= {}
-        self.data[attr] = arg
-      end
+      @@aggregate_name = relation_name
+      join_table = :"#{relation_name}_event"
+      has_one join_table, foreign_key: :event_id
+      has_one relation_name, through: join_table
     end
 
-    @data_attributes
+    # Define attributes to be serialize in the `data` column.
+    # It generates setters and getters for those.
+    #
+    # Example:
+    #
+    # class MyEvent < EventSrc::BaseEvent
+    #   data_attributes :title, :description, :drop_id
+    # end
+    def data_attributes(*attrs)
+      @data_attributes ||= []
+
+      attrs.map(&:to_s).each do |attr|
+        @data_attributes << attr unless @data_attributes.include?(attr)
+
+        define_method attr do
+          self.data ||= {}
+          self.data[attr]
+        end
+
+        define_method "#{attr}=" do |arg|
+          self.data ||= {}
+          self.data[attr] = arg
+        end
+      end
+
+      @data_attributes
+    end
   end
 
   def aggregate=(model)
@@ -75,13 +84,9 @@ class EventSrc::BaseEvent < ActiveRecord::Base
   end
 
   def build_aggregate
-    public_send "build_#{aggregate_name}"
-  end
-
-  def self.aggregate_name
-    inferred_aggregate = reflect_on_all_associations(:belongs_to).first
-    raise "Events must belong to an aggregate" if inferred_aggregate.nil?
-    inferred_aggregate.name
+    aggregate = self.class.reflect_on_association(aggregate_name)
+      .klass.new
+    send(:"#{aggregate_name}=", aggregate)
   end
 
   delegate :aggregate_name, to: :class
@@ -105,10 +110,6 @@ class EventSrc::BaseEvent < ActiveRecord::Base
     aggregate.lock! if aggregate.persisted?
 
     apply
-
-    # Persist!
-    aggregate.save!
-    self.aggregate_id = aggregate.id if aggregate_id.nil?
   end
 
   def apply
