@@ -27,11 +27,11 @@ module EventSrc::BaseEvent
     end
 
     def aggregate_name
-      @@aggregate_name || (raise "Events must belong to an aggregate")
+      self.class_variable_get(:@@aggregate_name) || (raise "Events must belong to an aggregate")
     end
 
     def event_for(relation_name, class_name: nil)
-      @@aggregate_name = relation_name
+      self.class_variable_set(:@@aggregate_name, relation_name)
       join_table = :"#{relation_name}_event"
       has_one join_table, foreign_key: :event_id
       has_one relation_name, through: join_table
